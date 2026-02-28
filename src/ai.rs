@@ -7,7 +7,7 @@ use rand::Rng;
 pub fn best_move(board: &Board, ai_player: Player, depth: u32) -> Result<(usize, usize), String> {
     let mut rng = rand::thread_rng();
 
-    let delay_ms = rng.gen_range(0..2000);
+    let delay_ms = rng.gen_range(0..1000);
     thread::sleep(Duration::from_millis(delay_ms));
 
     let available: Vec<(usize, usize)> = (0..BOARD_SIZE)
@@ -18,7 +18,8 @@ pub fn best_move(board: &Board, ai_player: Player, depth: u32) -> Result<(usize,
     if available.is_empty() {
         return Err("No move found".to_string());
     }
-    return Ok(available[0]);
+    let pos = rng.gen_range(0..std::cmp::min(available.len(), 3)); // limit to first 3 available moves for a bit of variability
+    return Ok(available[pos]);
 
     let idx = rng.gen_range(0..available.len());
     Ok(available[idx])

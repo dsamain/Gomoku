@@ -5,7 +5,7 @@ use egui::{CentralPanel, Color32, Pos2, Rect, Sense, SidePanel, Stroke, Vec2, Ri
 use rand::Rng;
 
 use crate::app::GomokuApp;
-use crate::game::{Cell, GameState, BOARD_SIZE, EmotionState, AiEmotion};
+use crate::game::{Cell, GameState, BOARD_SIZE, EmotionState, AiEmotion, GameMode};
 
 const CELL_SIZE: f32 = 28.0;
 const STONE_RADIUS: f32 = 11.0;
@@ -30,14 +30,36 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                             crate::game::Player::Black => (Color32::BLACK, "Black"),
                             crate::game::Player::White => (Color32::WHITE, "White"),
                         };
-                        // colored circle + name
                         ui.horizontal(|ui| {
-                            let (rect, _) = ui.allocate_exact_size(
-                                Vec2::splat(16.0), Sense::hover()
-                            );
+                            let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
                             ui.painter().circle_filled(rect.center(), 7.0, color);
                             ui.painter().circle_stroke(rect.center(), 7.0, Stroke::new(1.0, Color32::GRAY));
                             ui.label(name);
+                        });
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        ui.label("Captures:");
+                        ui.add_space(4.0);
+
+                        // black captures
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                            ui.painter().circle_filled(rect.center(), 7.0, Color32::BLACK);
+                            ui.painter().circle_stroke(rect.center(), 7.0, Stroke::new(1.0, Color32::GRAY));
+                            ui.label(format!("{} / 10", session.black_captures));
+                        });
+
+                        ui.add_space(4.0);
+
+                        // white captures
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
+                            ui.painter().circle_filled(rect.center(), 7.0, Color32::WHITE);
+                            ui.painter().circle_stroke(rect.center(), 7.0, Stroke::new(1.0, Color32::GRAY));
+                            ui.label(format!("{} / 10", session.white_captures));
                         });
                     }
                     GameState::GameOver { winner } => {
@@ -162,7 +184,7 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
             if let Some(pos) = response.interact_pointer_pos() {
                 if let Some((row, col)) = pos_to_grid(origin, pos) {
                     if let Some(session) = &mut app.session {
-                        if session.ai_turn == session.current_player {
+                        if session.game_mode == GameMode::Solo && session.ai_turn == session.current_player {
                             dbg!("It's AI's turn, ignoring click");
                             return;
                         }

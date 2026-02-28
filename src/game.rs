@@ -5,7 +5,7 @@ pub const DIRECTIONS: [(isize, isize); 4] = [
     (1, 0), (0, 1), (1, 1), (1, -1), 
 ];
 pub const WIN_COUNT: usize = 5;
-
+pub const CAPTURE_WIN: u32 = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cell {
@@ -43,6 +43,10 @@ impl Player {
     }
 }
 
+fn in_bounds(x: isize, y: isize) -> bool {
+    x >= 0 && x < BOARD_SIZE as isize && y >= 0 && y < BOARD_SIZE as isize
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Board {
     pub cells: [[Cell; BOARD_SIZE]; BOARD_SIZE],
@@ -74,6 +78,37 @@ impl Board {
         self.winner
     }
 
+    /// Check for captures after placing at (x, y) for player.
+    /// Removes captured pairs from the board and returns the number of stones captured.
+    pub fn check_captures(&mut self, x: usize, y: usize, player: Player) -> u32 {
+        let own = player.to_cell();
+        let opponent = player.next().to_cell();
+        let mut captured = 0;
+
+        for &(dx, dy) in DIRECTIONS.iter() {
+            for dir in [1isize, -1isize] {  // check both directions along each axis
+                let p1 = (x as isize + dx * dir,     y as isize + dy * dir);
+                let p2 = (x as isize + dx * dir * 2, y as isize + dy * dir * 2);
+                let p3 = (x as isize + dx * dir * 3, y as isize + dy * dir * 3);
+
+                if !in_bounds(p1.0, p1.1) || !in_bounds(p2.0, p2.1) || !in_bounds(p3.0, p3.1) {
+                    continue;
+                }
+
+                if self.cells[p1.1 as usize][p1.0 as usize] == opponent
+                    && self.cells[p2.1 as usize][p2.0 as usize] == opponent
+                    && self.cells[p3.1 as usize][p3.0 as usize] == own
+                {
+                    self.cells[p1.1 as usize][p1.0 as usize] = Cell::Empty;
+                    self.cells[p2.1 as usize][p2.0 as usize] = Cell::Empty;
+                    captured += 2;
+                }
+            }
+        }
+
+        captured
+    }
+
     fn check_winner_from(&self, x: usize, y: usize) -> Option<Player> {
         let cell = self.cells[y][x];
         if cell == Cell::Empty {
@@ -87,10 +122,10 @@ impl Board {
 
         for &(dx, dy) in DIRECTIONS.iter() {
             let mut count = 1;
-            for dir in [1, -1].iter() {
+            for dir in [1isize, -1isize].iter() {
                 let mut nx = x as isize + dx * *dir;
                 let mut ny = y as isize + dy * *dir;
-                while nx >= 0 && nx < BOARD_SIZE as isize && ny >= 0 && ny < BOARD_SIZE as isize {
+                while in_bounds(nx, ny) {
                     if self.cells[ny as usize][nx as usize] != cell || count >= WIN_COUNT {
                         break;
                     }
@@ -105,7 +140,6 @@ impl Board {
         }
         None
     }
-
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,12 +163,13 @@ pub enum AiEmotion {
     Angry,
     Surprised,
 }
-use std::time::{Instant, Duration};
+
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub struct EmotionState {
     pub emotion: AiEmotion,
-    pub until: Option<Instant>, // None = permanent, Some = expires at this time
+    pub until: Option<Instant>,
     def: AiEmotion,
     permanent: bool,
 }
@@ -178,7 +213,6 @@ impl EmotionState {
     pub fn tick(&mut self) {
         if let Some(until) = self.until {
             if Instant::now() >= until {
-                dbg!("Emotion expired, reverting to default:", self.def);
                 self.emotion = self.def;
                 self.until = None;
             }
@@ -193,7 +227,6 @@ pub struct GameSession {
     pub state: GameState,
     pub move_history: Vec<(usize, usize)>,
     pub game_mode: GameMode,
-    // pub ai: Option<crate::ai::AI>,
     pub ai_turn: Player,
     pub ai_emotion: EmotionState,
     pub black_captures: u32,
@@ -207,25 +240,50 @@ impl Default for GameSession {
             current_player: Player::Black,
             state: GameState::Menu,
             move_history: Vec::new(),
-            game_mode: GameMode::Solo,
+            game_mode: GameMode::TwoPlayer,
             ai_turn: Player::White,
             ai_emotion: EmotionState::default(),
+            black_captures: 0,
+            white_captures: 0,
         }
     }
 }
 
 impl GameSession {
+    pub fn captures_for(&self, player: Player) -> u32 {
+        match player {
+            Player::Black => self.black_captures,
+            Player::White => self.white_captures,
+        }
+    }
+
     pub fn play_at(&mut self, x: usize, y: usize) {
         if self.state != GameState::Playing { return; }
         if !self.board.is_empty(x, y) { return; }
 
-        self.board.place(x, y, self.current_player);
+        let player = self.current_player;
+        self.board.place(x, y, player);
         self.move_history.push((x, y));
 
+        // check captures
+        let captured = self.board.check_captures(x, y, player);
+        match player {
+            Player::Black => self.black_captures += captured,
+            Player::White => self.white_captures += captured,
+        }
+
+        // capture win condition
+        if self.captures_for(player) >= CAPTURE_WIN {
+            self.state = GameState::GameOver { winner: Some(player) };
+            return;
+        }
+
+        // alignment win condition
         if let Some(winner) = self.board.winner() {
             self.state = GameState::GameOver { winner: Some(winner) };
-        } else {
-            self.current_player = self.current_player.next();
-        } 
+            return;
+        }
+
+        self.current_player = player.next();
     }
 }
