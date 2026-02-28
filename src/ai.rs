@@ -7,7 +7,7 @@ use rand::Rng;
 pub fn best_move(board: &Board, ai_player: Player, depth: u32) -> Result<(usize, usize), String> {
     let mut rng = rand::thread_rng();
 
-    let delay_ms = rng.gen_range(0..1000);
+    let delay_ms = rng.gen_range(0..2000);
     thread::sleep(Duration::from_millis(delay_ms));
 
     let available: Vec<(usize, usize)> = (0..BOARD_SIZE)

@@ -6,6 +6,7 @@ mod game;
 mod menu;
 mod board;
 mod ai;
+mod settings;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {

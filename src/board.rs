@@ -84,6 +84,15 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                 app.start_game();
             }
 
+            // --- debug section ---
+            if app.debug_mode {
+                ui.add_space(10.0);
+                ui.separator();
+                ui.label(RichText::new("🛠 Debug").size(13.0).strong());
+                ui.add_space(4.0);
+                ui.checkbox(&mut app.debug_no_turn_pass, "Don't pass turn");
+            }
+
             // AI emotion display
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 let emotion = app.session
@@ -177,6 +186,11 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                     painter.circle_stroke(pos, STONE_RADIUS, Stroke::new(1.0, Color32::DARK_GRAY));
                 }
             }
+            // draw forbidden move indicators for current player (free three)
+            for &(fx, fy) in &session.forbidden_moves {
+                let pos = grid_to_pos(origin, fy, fx);
+                painter.circle_filled(pos, 5.0, Color32::from_rgba_premultiplied(255, 0, 0, 120));
+            }
         }
 
         // handle click — find nearest intersection
@@ -188,14 +202,19 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                             dbg!("It's AI's turn, ignoring click");
                             return;
                         }
-                        session.play_at(col, row);
+                        if app.debug_no_turn_pass {
+                            session.apply_move(col, row);
+                            session.recompute_forbidden();
+                        } else {
+                            session.play_at(col, row);
+                        }
                         let mut rng = rand::thread_rng();
                         let roll: f64 = rng.gen_range(0.0..1.0);
 
                         match roll {
-                            r if r < 0.2 => session.ai_emotion.set_timed(AiEmotion::Angry, Duration::from_millis(800)),
-                            r if r < 0.4 && r >= 0.2 => session.ai_emotion.set_timed(AiEmotion::Surprised, Duration::from_millis(800)),
-                            _ => {} // 0.6 probability — do nothing
+                            // r if r < 0.2 => session.ai_emotion.set_timed(AiEmotion::Angry, Duration::from_millis(400)),
+                            r if r < 0.5 && r >= 0.2 => session.ai_emotion.set_timed(AiEmotion::Surprised, Duration::from_millis(500)),
+                            _ => {}
                         }
                         dbg!("Clicked grid:", row, col);
                     }

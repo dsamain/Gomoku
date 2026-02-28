@@ -2,7 +2,7 @@
 
 pub const BOARD_SIZE: usize = 19;
 pub const DIRECTIONS: [(isize, isize); 4] = [
-    (1, 0), (0, 1), (1, 1), (1, -1), 
+    (1, 0), (0, 1), (1, 1), (1, -1),
 ];
 pub const WIN_COUNT: usize = 5;
 pub const CAPTURE_WIN: u32 = 10;
@@ -43,7 +43,7 @@ impl Player {
     }
 }
 
-fn in_bounds(x: isize, y: isize) -> bool {
+pub fn in_bounds(x: isize, y: isize) -> bool {
     x >= 0 && x < BOARD_SIZE as isize && y >= 0 && y < BOARD_SIZE as isize
 }
 
@@ -79,14 +79,14 @@ impl Board {
     }
 
     /// Check for captures after placing at (x, y) for player.
-    /// Removes captured pairs from the board and returns the number of stones captured.
+    /// Removes captured pairs and returns the number of stones captured.
     pub fn check_captures(&mut self, x: usize, y: usize, player: Player) -> u32 {
         let own = player.to_cell();
         let opponent = player.next().to_cell();
         let mut captured = 0;
 
         for &(dx, dy) in DIRECTIONS.iter() {
-            for dir in [1isize, -1isize] {  // check both directions along each axis
+            for dir in [1isize, -1isize] {
                 let p1 = (x as isize + dx * dir,     y as isize + dy * dir);
                 let p2 = (x as isize + dx * dir * 2, y as isize + dy * dir * 2);
                 let p3 = (x as isize + dx * dir * 3, y as isize + dy * dir * 3);
@@ -109,11 +109,142 @@ impl Board {
         captured
     }
 
+    // -------------------------------------------------------------------------
+    // Double-three detection
+    // -------------------------------------------------------------------------
+
+    /// Returns true if placing at (x,y) for player creates a double-three.
+    pub fn is_double_three(&self, x: usize, y: usize, player: Player) -> bool {
+        let mut temp = *self;
+        temp.cells[y][x] = player.to_cell();
+
+        let free_three_count = DIRECTIONS.iter()
+            .filter(|&&(dx, dy)| temp.is_free_three(x, y, dx, dy, player))
+            .count();
+
+        // temp to debug all free three coordinates
+        for &(dx, dy) in DIRECTIONS.iter() {
+            if temp.is_free_three(x, y, dx, dy, player) {
+                dbg!("Free three at:", (x, y), "direction:", (dx, dy));
+            }
+        }
+        dbg!("double three count for:", (x, y), "is:", free_three_count);
+
+        free_three_count >= 2
+    }
+
+    /// Returns true if there is a free-three through (x,y) in direction (dx,dy).
+    /// A free-three is exactly 3 aligned stones that can be extended to an open four (.XXXX.)
+    fn is_free_three(&self, x: usize, y: usize, dx: isize, dy: isize, player: Player) -> bool {
+        let cell = player.to_cell();
+
+        // slide a window of 5 cells along this direction
+        // look for windows containing exactly 3 of our stones, 0 opponents, 2 empties
+        // AND both cells just outside the window must be empty (open four condition)
+        for start in -4isize..=0 {
+            let positions: Vec<(isize, isize)> = (0..5)
+                .map(|i| (x as isize + dx * (start + i), y as isize + dy * (start + i)))
+                .collect();
+
+            // window must be fully in bounds
+            if positions.iter().any(|&(px, py)| !in_bounds(px, py)) {
+                continue;
+            }
+
+            // (x,y) must be inside this window
+            if !positions.iter().any(|&(px, py)| px == x as isize && py == y as isize) {
+                continue;
+            }
+
+            let cells: Vec<Cell> = positions.iter()
+                .map(|&(px, py)| self.cells[py as usize][px as usize])
+                .collect();
+
+            // window must have exactly 3 of our stones and no opponent stones
+            let our_count = cells.iter().filter(|&&c| c == cell).count();
+            let opponent_count = cells.iter().filter(|&&c| c != cell && c != Cell::Empty).count();
+
+            if our_count != 3 || opponent_count != 0 {
+                continue;
+            }
+
+            // both ends just outside the window must be empty (makes it an open four)
+            let before = (positions[0].0 - dx, positions[0].1 - dy);
+            let after  = (positions[4].0 + dx, positions[4].1 + dy);
+
+            let before_open = !in_bounds(before.0, before.1)
+                || self.cells[before.1 as usize][before.0 as usize] == Cell::Empty;
+            let after_open = !in_bounds(after.0, after.1)
+                || self.cells[after.1 as usize][after.0 as usize] == Cell::Empty;
+
+            if before_open && after_open {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Count consecutive stones of `cell` through (x,y) in direction (dx,dy).
+    /// Returns (count, is_left_open, is_right_open).
+    fn count_sequence(&self, x: usize, y: usize, dx: isize, dy: isize, cell: Cell)
+        -> (usize, bool, bool)
+    {
+        let (left_end, right_end) = self.sequence_endpoints(x, y, dx, dy, cell);
+
+        let mut count = 0;
+        let mut cx = left_end.0;
+        let mut cy = left_end.1;
+        loop {
+            if self.cells[cy as usize][cx as usize] == cell {
+                count += 1;
+            }
+            if (cx, cy) == right_end { break; }
+            cx += dx;
+            cy += dy;
+        }
+
+        let left_neighbor = (left_end.0 - dx, left_end.1 - dy);
+        let right_neighbor = (right_end.0 + dx, right_end.1 + dy);
+
+        let left_open = in_bounds(left_neighbor.0, left_neighbor.1)
+            && self.cells[left_neighbor.1 as usize][left_neighbor.0 as usize] == Cell::Empty;
+        let right_open = in_bounds(right_neighbor.0, right_neighbor.1)
+            && self.cells[right_neighbor.1 as usize][right_neighbor.0 as usize] == Cell::Empty;
+
+        (count, left_open, right_open)
+    }
+
+    /// Find the leftmost and rightmost positions of the sequence through (x,y).
+    fn sequence_endpoints(&self, x: usize, y: usize, dx: isize, dy: isize, cell: Cell)
+        -> ((isize, isize), (isize, isize))
+    {
+        let mut left = (x as isize, y as isize);
+        let mut right = (x as isize, y as isize);
+
+        let mut nx = x as isize - dx;
+        let mut ny = y as isize - dy;
+        while in_bounds(nx, ny) && self.cells[ny as usize][nx as usize] == cell {
+            left = (nx, ny);
+            nx -= dx;
+            ny -= dy;
+        }
+
+        let mut nx = x as isize + dx;
+        let mut ny = y as isize + dy;
+        while in_bounds(nx, ny) && self.cells[ny as usize][nx as usize] == cell {
+            right = (nx, ny);
+            nx += dx;
+            ny += dy;
+        }
+
+        (left, right)
+    }
+
     fn check_winner_from(&self, x: usize, y: usize) -> Option<Player> {
         let cell = self.cells[y][x];
-        if cell == Cell::Empty {
-            return None;
-        }
+        if cell == Cell::Empty { return None; }
+
         let player = match cell {
             Cell::Black => Player::Black,
             Cell::White => Player::White,
@@ -122,16 +253,16 @@ impl Board {
 
         for &(dx, dy) in DIRECTIONS.iter() {
             let mut count = 1;
-            for dir in [1isize, -1isize].iter() {
-                let mut nx = x as isize + dx * *dir;
-                let mut ny = y as isize + dy * *dir;
+            for dir in [1isize, -1isize] {
+                let mut nx = x as isize + dx * dir;
+                let mut ny = y as isize + dy * dir;
                 while in_bounds(nx, ny) {
                     if self.cells[ny as usize][nx as usize] != cell || count >= WIN_COUNT {
                         break;
                     }
                     count += 1;
-                    nx += dx * *dir;
-                    ny += dy * *dir;
+                    nx += dx * dir;
+                    ny += dy * dir;
                 }
             }
             if count >= WIN_COUNT {
@@ -141,6 +272,8 @@ impl Board {
         None
     }
 }
+
+// -------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum GameState {
@@ -220,6 +353,8 @@ impl EmotionState {
     }
 }
 
+// -------------------------------------------------------------------------
+
 #[derive(Debug)]
 pub struct GameSession {
     pub board: Board,
@@ -231,6 +366,9 @@ pub struct GameSession {
     pub ai_emotion: EmotionState,
     pub black_captures: u32,
     pub white_captures: u32,
+    /// Cached forbidden moves (double-three) for the current player.
+    /// Recomputed once after each move — free to read in UI without extra cost.
+    pub forbidden_moves: Vec<(usize, usize)>,
 }
 
 impl Default for GameSession {
@@ -240,11 +378,12 @@ impl Default for GameSession {
             current_player: Player::Black,
             state: GameState::Menu,
             move_history: Vec::new(),
-            game_mode: GameMode::TwoPlayer,
+            game_mode: GameMode::Solo,
             ai_turn: Player::White,
             ai_emotion: EmotionState::default(),
             black_captures: 0,
             white_captures: 0,
+            forbidden_moves: Vec::new(), // empty at start, no stones placed yet
         }
     }
 }
@@ -257,33 +396,59 @@ impl GameSession {
         }
     }
 
-    pub fn play_at(&mut self, x: usize, y: usize) {
-        if self.state != GameState::Playing { return; }
-        if !self.board.is_empty(x, y) { return; }
+    pub fn is_forbidden(&self, x: usize, y: usize) -> bool {
+        self.forbidden_moves.contains(&(x, y))
+    }
+
+    /// Recompute forbidden moves for the current player.
+    /// Called once after each move — O(BOARD_SIZE^2 * 4 directions).
+    pub fn recompute_forbidden(&mut self) {
+        self.forbidden_moves.clear();
+        let player = self.current_player;
+        for y in 0..BOARD_SIZE {
+            for x in 0..BOARD_SIZE {
+                if self.board.is_empty(x, y) && self.board.is_double_three(x, y, player) {
+                    self.forbidden_moves.push((x, y));
+                }
+            }
+        }
+    }
+
+    /// Apply the move — place stone, captures, win check. Does NOT switch turn.
+    pub fn apply_move(&mut self, x: usize, y: usize) -> bool { // returns false if invalid
+        if self.state != GameState::Playing { return false; }
+        if !self.board.is_empty(x, y) { return false; }
+        if self.is_forbidden(x, y) { return false; }
 
         let player = self.current_player;
         self.board.place(x, y, player);
         self.move_history.push((x, y));
 
-        // check captures
         let captured = self.board.check_captures(x, y, player);
         match player {
             Player::Black => self.black_captures += captured,
             Player::White => self.white_captures += captured,
         }
 
-        // capture win condition
         if self.captures_for(player) >= CAPTURE_WIN {
             self.state = GameState::GameOver { winner: Some(player) };
-            return;
-        }
-
-        // alignment win condition
-        if let Some(winner) = self.board.winner() {
+        } else if let Some(winner) = self.board.winner() {
             self.state = GameState::GameOver { winner: Some(winner) };
-            return;
         }
 
-        self.current_player = player.next();
+        true
+    }
+
+    /// Advance to the next turn — switch player and recompute forbidden.
+    pub fn advance_turn(&mut self) {
+        self.current_player = self.current_player.next();
+        self.recompute_forbidden();
+    }
+
+    /// Convenience: apply move and advance turn (normal gameplay)
+    pub fn play_at(&mut self, x: usize, y: usize) {
+        if self.apply_move(x, y) && self.state == GameState::Playing {
+            self.advance_turn();
+        }
     }
 }

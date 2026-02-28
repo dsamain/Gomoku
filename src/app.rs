@@ -4,9 +4,7 @@ use std::sync::mpsc;
 use std::collections::HashMap;
 
 use crate::game::{GameSession, GameState, AiEmotion};
-use crate::egui;
-use crate::menu;
-use crate::board;
+use crate::{egui, settings, menu, board};
 
 
 #[derive(Debug, PartialEq, Eq)]
@@ -22,6 +20,11 @@ pub struct GomokuApp {
     pub ai_rx: Option<mpsc::Receiver<Result<(usize, usize), String>>>,
     pub ai_thinking: bool,
     pub ai_textures: HashMap<AiEmotion, egui::TextureHandle>,
+
+    // Settings
+    pub debug_mode: bool,
+    pub two_player_mode: bool,
+    pub debug_no_turn_pass: bool,
 }
 
 impl Default for GomokuApp {
@@ -32,6 +35,10 @@ impl Default for GomokuApp {
             ai_rx: None,
             ai_thinking: false,
             ai_textures: HashMap::new(),
+
+            two_player_mode: false,
+            debug_mode: true,
+            debug_no_turn_pass: false,
         }
     }
 }
@@ -79,7 +86,7 @@ impl eframe::App for GomokuApp {
             match self.screen {
                 Screen::Menu => menu::show(ctx, self),
                 Screen::Game => board::show(ctx, self),
-                Screen::Settings => {ui.label("Settings Screen");},
+                Screen::Settings => settings::show(ctx, self),
                 // _ => unreachable!(),
             }
         });
@@ -119,10 +126,19 @@ impl GomokuApp {
         }
     }
 
+    // when start game, session is built from default, then parameter from app are applied
     pub fn start_game(&mut self) {
         self.session = Some(GameSession::default());
+        // self.session.as_mut().unwrap().state = GameState::Playing;
+        if let Some(session) = &mut self.session {
+            session.state = GameState::Playing;
+            if self.two_player_mode {
+                session.game_mode = crate::game::GameMode::TwoPlayer;
+            } else {
+                session.game_mode = crate::game::GameMode::Solo;
+            }
+        }
         self.screen = Screen::Game;
-        self.session.as_mut().unwrap().state = GameState::Playing;
     }
 
     pub fn back_to_menu(&mut self) {
