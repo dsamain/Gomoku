@@ -1,17 +1,22 @@
 use eframe::egui;
+use app::GomokuApp;
 
 mod app;
 mod game;
-
+mod menu;
+mod board;
+mod ai;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(800.0, 600.0)),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 700.0])
+            .with_title("Gomoku"),
         ..Default::default()
     };
+
     eframe::run_native(
         "Gomoku",
         options,
-        Box::new(|_cc| Box::new(game::GameApp::new())),
-    )   
+        Box::new(|cc| Box::new(GomokuApp::new(cc))))
 }
