@@ -95,13 +95,46 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
 
             // AI emotion display
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                ui.add_space(20.0);
                 let emotion = app.session
                     .as_ref()
-                    .map(|s| s.ai_emotion.emotion)  // only copy the AiEmotion, not the whole EmotionState
+                    .map(|s| s.ai_emotion.emotion)
                     .unwrap_or(AiEmotion::Neutral);
-
                 if let Some(texture) = app.ai_textures.get(&emotion) {
-                    ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(120.0, 120.0)));
+                    // Frame comes first in bottom_up = renders at bottom
+                    egui::Frame::none()
+                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 140, 200)))
+                        .rounding(egui::Rounding {
+                            nw: 0.0, ne: 8.0,
+                            sw: 8.0, se: 8.0,
+                        })
+                        .inner_margin(egui::Margin::same(6.0))
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Image::new(texture)
+                                    .fit_to_exact_size(egui::vec2(120.0, 120.0))
+                            );
+                        });
+                    // Tab comes second = renders on top of frame
+                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                        ui.add_space(4.0); // small left indent to align with frame edge
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(100, 140, 200))
+                            .rounding(egui::Rounding {
+                                nw: 4.0, ne: 4.0,
+                                sw: 0.0, se: 0.0,
+                            })
+                            .inner_margin(egui::Margin { left: 8.0, right: 8.0, top: 2.0, bottom: 0.0 })
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new("AI")
+                                        .small()
+                                        .color(egui::Color32::WHITE)
+                                        .strong()
+                                );
+                            });
+                    });
                 }
             });
         });

@@ -137,51 +137,35 @@ impl Board {
     /// A free-three is exactly 3 aligned stones that can be extended to an open four (.XXXX.)
     fn is_free_three(&self, x: usize, y: usize, dx: isize, dy: isize, player: Player) -> bool {
         let cell = player.to_cell();
-
-        // slide a window of 5 cells along this direction
-        // look for windows containing exactly 3 of our stones, 0 opponents, 2 empties
-        // AND both cells just outside the window must be empty (open four condition)
-        for start in -4isize..=0 {
-            let positions: Vec<(isize, isize)> = (0..5)
+        for start in -3isize..=0 {  // was -4..=0
+            let positions: Vec<(isize, isize)> = (0..4)  // was 0..5
                 .map(|i| (x as isize + dx * (start + i), y as isize + dy * (start + i)))
                 .collect();
-
-            // window must be fully in bounds
             if positions.iter().any(|&(px, py)| !in_bounds(px, py)) {
                 continue;
             }
-
-            // (x,y) must be inside this window
             if !positions.iter().any(|&(px, py)| px == x as isize && py == y as isize) {
                 continue;
             }
-
             let cells: Vec<Cell> = positions.iter()
                 .map(|&(px, py)| self.cells[py as usize][px as usize])
                 .collect();
-
-            // window must have exactly 3 of our stones and no opponent stones
             let our_count = cells.iter().filter(|&&c| c == cell).count();
             let opponent_count = cells.iter().filter(|&&c| c != cell && c != Cell::Empty).count();
-
-            if our_count != 3 || opponent_count != 0 {
+            if our_count != 3 || opponent_count != 0 {  // still 3 stones, 1 empty in window
                 continue;
             }
-
-            // both ends just outside the window must be empty (makes it an open four)
+            // ends just outside the 4-cell window
             let before = (positions[0].0 - dx, positions[0].1 - dy);
-            let after  = (positions[4].0 + dx, positions[4].1 + dy);
-
+            let after  = (positions[3].0 + dx, positions[3].1 + dy);  // was positions[4]
             let before_open = !in_bounds(before.0, before.1)
                 || self.cells[before.1 as usize][before.0 as usize] == Cell::Empty;
             let after_open = !in_bounds(after.0, after.1)
                 || self.cells[after.1 as usize][after.0 as usize] == Cell::Empty;
-
             if before_open && after_open {
                 return true;
             }
         }
-
         false
     }
 

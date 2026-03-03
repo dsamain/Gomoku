@@ -101,10 +101,10 @@ impl eframe::App for GomokuApp {
 fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> egui::TextureHandle {
     let image = image::load_from_memory(bytes).unwrap();
     let size = [image.width() as usize, image.height() as usize];
-    let pixels = image.to_rgb8();
+    let pixels = image.to_rgba8();
     ctx.load_texture(
         name,
-        egui::ColorImage::from_rgb(size, &pixels),
+        egui::ColorImage::from_rgba_unmultiplied(size, &pixels),
         Default::default()
     )
 }
@@ -114,11 +114,11 @@ impl GomokuApp {
         let ctx = &cc.egui_ctx;
         let mut textures = HashMap::new();
 
-        textures.insert(AiEmotion::Neutral,  load_texture(ctx, "neutral",  include_bytes!("../assets/neutral.jpeg")));
-        textures.insert(AiEmotion::Thinking, load_texture(ctx, "thinking", include_bytes!("../assets/thinking.jpeg")));
-        textures.insert(AiEmotion::Happy,    load_texture(ctx, "happy",    include_bytes!("../assets/happy.jpeg")));
-        textures.insert(AiEmotion::Angry,    load_texture(ctx, "angry",    include_bytes!("../assets/angry.jpeg")));
-        textures.insert(AiEmotion::Surprised,load_texture(ctx, "surprised",include_bytes!("../assets/surprised.jpeg")));
+        textures.insert(AiEmotion::Neutral,  load_texture(ctx, "neutral",  include_bytes!("../assets/neutral.png")));
+        textures.insert(AiEmotion::Thinking, load_texture(ctx, "thinking", include_bytes!("../assets/thinking.png")));
+        textures.insert(AiEmotion::Happy,    load_texture(ctx, "happy",    include_bytes!("../assets/happy.png")));
+        textures.insert(AiEmotion::Angry,    load_texture(ctx, "angry",    include_bytes!("../assets/angry.png")));
+        textures.insert(AiEmotion::Surprised,load_texture(ctx, "surprised",include_bytes!("../assets/surprised.png")));
 
         Self {
             ai_textures: textures,
