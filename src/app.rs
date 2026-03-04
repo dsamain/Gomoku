@@ -17,7 +17,8 @@ pub enum Screen {
 pub struct GomokuApp {
     pub screen: Screen,
     pub session: Option<GameSession>,
-    pub ai_rx: Option<mpsc::Receiver<Result<(usize, usize), String>>>,
+    pub ai_rx: Option<mpsc::Receiver<Result<((usize, usize), crate::ai::AiStats), String>>>,
+    pub ai_last_stats: Option<crate::ai::AiStats>,
     pub ai_thinking: bool,
     pub ai_think_start: Option<std::time::Instant>,
     pub ai_last_think_duration: Option<f32>,
@@ -37,6 +38,7 @@ impl Default for GomokuApp {
             screen: Screen::Menu,
             session: None,
             ai_rx: None,
+            ai_last_stats: None,
             ai_thinking: false,
             ai_think_start: None,
             ai_last_think_duration: None,
@@ -44,8 +46,8 @@ impl Default for GomokuApp {
             ai_textures: HashMap::new(),
 
             game_mode: GameMode::Solo,
-            ai_depth: 3,
-            debug_mode: true,
+            ai_depth: 4,
+            debug_mode: false,
             debug_no_turn_pass: false,
         }
     }
@@ -59,10 +61,11 @@ impl eframe::App for GomokuApp {
                 if let Some(rx) = &self.ai_rx {
                     if let Ok(inner) = rx.try_recv() {
                         match inner {
-                            Ok((x, y)) => {
+                            Ok(((x, y), stats)) => {
                                 if let Some(session) = &mut self.session {
                                     session.play_at(x, y);
                                 }
+                                self.ai_last_stats = Some(stats);
                             }
                             Err(e) => {
                                 dbg!("AI error:", e);

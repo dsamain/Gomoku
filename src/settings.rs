@@ -48,7 +48,10 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                     .size(14.0)
                     .color(egui::Color32::from_rgb(150, 150, 150)));
                 ui.add_space(4.0);
-                ui.add(egui::Slider::new(&mut app.ai_depth, 1..=8).show_value(false));
+                ui.add_sized(
+                    Vec2::new(100.0, 20.0),
+                    egui::Slider::new(&mut app.ai_depth, 1..=8).show_value(false)
+                );
                 ui.add_space(4.0);
                 let depth_label = match app.ai_depth {
                     1..=2 => "Easy",

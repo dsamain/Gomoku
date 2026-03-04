@@ -3,13 +3,22 @@ use rand::Rng;
 
 const INF: i32 = 10_000_000;
 const WIN_SCORE: i32 = 1_000_000;
+const MAX_CANDIDATES: usize = 20;
 
 // -------------------------------------------------------------------------
-// Search statistics
+// Search statistics — public so app.rs can store and board.rs can display
 // -------------------------------------------------------------------------
+
+#[derive(Default, Clone, Debug)]
+pub struct AiStats {
+    pub nodes: u64,
+    pub pruned: u64,
+    pub avg_branch: f64,
+    pub time_ms: u128,
+}
 
 #[derive(Default)]
-pub struct SearchStats {
+struct SearchStats {
     nodes: u64,
     pruned: u64,
     total_candidates: u64,
@@ -22,19 +31,18 @@ impl SearchStats {
         self.total_candidates as f64 / self.candidate_calls as f64
     }
 
-    fn print(&self, elapsed_ms: u128) {
-        println!(
-            "[AI] nodes={} pruned={} avg_branch={:.1} time={}ms",
-            self.nodes,
-            self.pruned,
-            self.avg_candidates(),
-            elapsed_ms,
-        );
+    fn to_ai_stats(&self, elapsed_ms: u128) -> AiStats {
+        AiStats {
+            nodes: self.nodes,
+            pruned: self.pruned,
+            avg_branch: self.avg_candidates(),
+            time_ms: elapsed_ms,
+        }
     }
 }
 
 // -------------------------------------------------------------------------
-// Move undo system — apply and undo moves without copying the board
+// Move undo system
 // -------------------------------------------------------------------------
 
 struct MoveUndo {
@@ -94,19 +102,20 @@ pub fn best_move(
     depth: u32,
     ai_captures: u32,
     opp_captures: u32,
-) -> Result<(usize, usize), String> {
+) -> Result<((usize, usize), AiStats), String> {
     let timer = std::time::Instant::now();
     let mut stats = SearchStats::default();
 
     let candidates = candidate_moves(board);
     if candidates.is_empty() {
-        return Ok((BOARD_SIZE / 2, BOARD_SIZE / 2));
+        let ai_stats = stats.to_ai_stats(timer.elapsed().as_millis());
+        return Ok(((BOARD_SIZE / 2, BOARD_SIZE / 2), ai_stats));
     }
 
-    let ordered = order_moves(board, &candidates, ai_player);
+    let mut board = *board; // ← move this up, before order_moves
+    let ordered = order_moves(&mut board, &candidates, ai_player);
     let mut best_score = i32::MIN;
     let mut best: Option<(usize, usize)> = None;
-    let mut board = *board;
 
     for (x, y) in ordered {
         if board.is_double_three(x, y, ai_player) { continue; }
@@ -116,8 +125,8 @@ pub fn best_move(
 
         if new_ai_caps >= CAPTURE_WIN || board.check_winner_from(x, y).is_some() {
             undo_move(&mut board, &undo);
-            stats.print(timer.elapsed().as_millis());
-            return Ok((x, y));
+            let ai_stats = stats.to_ai_stats(timer.elapsed().as_millis());
+            return Ok(((x, y), ai_stats));
         }
 
         let mut score = minimax(
@@ -137,8 +146,9 @@ pub fn best_move(
         }
     }
 
-    stats.print(timer.elapsed().as_millis());
-    best.ok_or_else(|| "No legal moves available".to_string())
+    let ai_stats = stats.to_ai_stats(timer.elapsed().as_millis());
+    best.map(|b| (b, ai_stats.clone()))
+        .ok_or_else(|| "No legal moves available".to_string())
 }
 
 // -------------------------------------------------------------------------
@@ -172,11 +182,7 @@ fn minimax(
         return evaluate(board, ai_player, ai_captures, opp_captures);
     }
 
-    let ordered: Vec<(usize, usize)> = if depth >= 2 {
-        order_moves(board, &candidates, current)
-    } else {
-        candidates
-    };
+    let ordered = order_moves(board, &candidates, current);
 
     if is_maximizing {
         let mut max_score = -INF;
@@ -197,10 +203,7 @@ fn minimax(
 
             max_score = max_score.max(score);
             alpha = alpha.max(score);
-            if beta <= alpha {
-                stats.pruned += 1;
-                break;
-            }
+            if beta <= alpha { stats.pruned += 1; break; }
         }
 
         max_score
@@ -223,10 +226,7 @@ fn minimax(
 
             min_score = min_score.min(score);
             beta = beta.min(score);
-            if beta <= alpha {
-                stats.pruned += 1;
-                break;
-            }
+            if beta <= alpha { stats.pruned += 1; break; }
         }
 
         min_score
@@ -234,7 +234,7 @@ fn minimax(
 }
 
 // -------------------------------------------------------------------------
-// Candidate moves — empty cells within distance 1 of existing stones
+// Candidate moves
 // -------------------------------------------------------------------------
 
 pub fn candidate_moves(board: &Board) -> Vec<(usize, usize)> {
@@ -267,45 +267,77 @@ pub fn candidate_moves(board: &Board) -> Vec<(usize, usize)> {
 // Move ordering
 // -------------------------------------------------------------------------
 
-fn order_moves(board: &Board, candidates: &[(usize, usize)], player: Player) -> Vec<(usize, usize)> {
+fn order_moves(board: &mut Board, candidates: &[(usize, usize)], player: Player) -> Vec<(usize, usize)> {
     let mut scored: Vec<(i32, (usize, usize))> = candidates.iter()
         .map(|&(x, y)| (quick_score(board, x, y, player), (x, y)))
         .collect();
     scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    scored.truncate(MAX_CANDIDATES);
     scored.into_iter().map(|(_, pos)| pos).collect()
 }
 
-fn quick_score(board: &Board, x: usize, y: usize, player: Player) -> i32 {
+fn quick_score(board: &mut Board, x: usize, y: usize, player: Player) -> i32 {
     let cell = player.to_cell();
     let opp  = player.next().to_cell();
     let mut score = 0;
 
     for &(dx, dy) in DIRECTIONS.iter() {
-        let own_count = count_dir(board, x, y, dx, dy, cell);
-        let opp_count = count_dir(board, x, y, dx, dy, opp);
-        score += own_count * own_count * 10;
-        score += opp_count * opp_count * 8;
+        // --- attack ---
+        board.cells[y][x] = cell;
+        let mut sx = x as isize;
+        let mut sy = y as isize;
+        while in_bounds(sx - dx, sy - dy)
+            && board.cells[(sy - dy) as usize][(sx - dx) as usize] == cell
+        {
+            sx -= dx; sy -= dy;
+        }
+        score += score_line(board, sx as usize, sy as usize, dx, dy, cell);
+
+        // --- block: try both directions to find opp sequence ---
+        board.cells[y][x] = Cell::Empty;
+        for &dir in &[1isize, -1isize] {
+            let mut sx = x as isize;
+            let mut sy = y as isize;
+            while in_bounds(sx - dx * dir, sy - dy * dir)
+                && board.cells[(sy - dy * dir) as usize][(sx - dx * dir) as usize] == opp
+            {
+                sx -= dx * dir;
+                sy -= dy * dir;
+            }
+            if sx != x as isize || sy != y as isize {
+                score += score_line(board, sx as usize, sy as usize, dx * dir, dy * dir, opp) / 2;
+                break;
+            }
+        }
     }
 
-    let cx = (BOARD_SIZE / 2) as isize;
-    let cy = (BOARD_SIZE / 2) as isize;
-    score -= ((x as isize - cx).abs() + (y as isize - cy).abs()) as i32;
-
+    board.cells[y][x] = Cell::Empty;
+    score += count_potential_captures(board, x, y, player) * 15_000;
     score
 }
 
-fn count_dir(board: &Board, x: usize, y: usize, dx: isize, dy: isize, cell: Cell) -> i32 {
-    let mut count = 0;
-    for dir in [1isize, -1isize] {
-        let mut nx = x as isize + dx * dir;
-        let mut ny = y as isize + dy * dir;
-        while in_bounds(nx, ny) && board.cells[ny as usize][nx as usize] == cell {
-            count += 1;
-            nx += dx * dir;
-            ny += dy * dir;
+fn count_potential_captures(board: &Board, x: usize, y: usize, player: Player) -> i32 {
+    let opp = player.next().to_cell();
+    let own = player.to_cell();
+    let mut captures = 0;
+
+    for &(dx, dy) in DIRECTIONS.iter() {
+        for dir in [1isize, -1isize] {
+            let p1 = (x as isize + dx * dir,     y as isize + dy * dir);
+            let p2 = (x as isize + dx * dir * 2, y as isize + dy * dir * 2);
+            let p3 = (x as isize + dx * dir * 3, y as isize + dy * dir * 3);
+
+            if !in_bounds(p1.0, p1.1) || !in_bounds(p2.0, p2.1) || !in_bounds(p3.0, p3.1) { continue; }
+
+            if board.cells[p1.1 as usize][p1.0 as usize] == opp
+                && board.cells[p2.1 as usize][p2.0 as usize] == opp
+                && board.cells[p3.1 as usize][p3.0 as usize] == own
+            {
+                captures += 1;
+            }
         }
     }
-    count
+    captures
 }
 
 // -------------------------------------------------------------------------
@@ -361,6 +393,8 @@ fn score_line(board: &Board, x: usize, y: usize, dx: isize, dy: isize, cell: Cel
         ny += dy;
     }
 
+    if count == 0 { return 0; }
+
     let before = (x as isize - dx, y as isize - dy);
     let after  = (nx, ny);
 
@@ -379,7 +413,8 @@ fn score_line(board: &Board, x: usize, y: usize, dx: isize, dy: isize, cell: Cel
         (3, 1)           => 500,
         (2, 2)           => 200,
         (2, 1)           => 50,
-        (1, 2)           => 10,
+        (1, 2)           => 10,  // open single
+        (1, 1)           => 0,   // half-open single — was 0, now gives variety
         _                => 0,
     }
 }

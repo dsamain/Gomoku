@@ -97,16 +97,16 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
 
-                let displayed_time = if let Some(start) = app.ai_think_start {
-                    start.elapsed().as_secs_f32()
-                } else if let Some(d) = app.ai_last_think_duration {
-                    d
-                } else {
-                    0.0
-                }; 
-                ui.label(RichText::new(format!("⏱ Time to think: {:.1}s", displayed_time))
-                    .size(12.0)
-                    .color(Color32::from_rgb(150, 150, 150)));
+                // let displayed_time = if let Some(start) = app.ai_think_start {
+                //     start.elapsed().as_secs_f32()
+                // } else if let Some(d) = app.ai_last_think_duration {
+                //     d
+                // } else {
+                //     0.0
+                // }; 
+                // ui.label(RichText::new(format!("⏱ Time to think: {:.1}s", displayed_time))
+                //     .size(12.0)
+                //     .color(Color32::from_rgb(150, 150, 150)));
 
 
                 let emotion = app.session
@@ -132,6 +132,25 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                 }
             });
         });
+
+    // --- bottom panel: AI stats ---
+    egui::TopBottomPanel::bottom("stats_ribbon")
+    .exact_height(24.0)
+    .show(ctx, |ui| {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.add_space(12.0);
+            if let Some(s) = &app.ai_last_stats {
+                ui.label(RichText::new(format!(
+                    // "⏱ {:.2}s   🌿 {} nodes   ✂ {} pruned   ⑂ {:.1} avg branch",
+                    "{:.2}s   {} nodes   {} pruned   {:.1} avg branch",
+                    s.time_ms as f32 / 1000.0, s.nodes, s.pruned, s.avg_branch,
+                )).size(11.0).color(Color32::from_rgb(150, 150, 150)));
+            } else {
+                ui.label(RichText::new("No AI stats yet")
+                    .size(11.0).color(Color32::from_rgb(80, 80, 80)));
+            }
+        });
+    });
 
     // --- main board area ---
     CentralPanel::default().show(ctx, |ui| {
@@ -200,7 +219,7 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
         }
 
         // draw star points (standard gomoku dots)
-        for &(r, c) in &[(3,3),(3,11),(7,7),(11,3),(11,11)] {
+        for &(r, c) in &[ (3,3),(3,9),(3,15), (9,3),(9,9),(9,15), (15,3),(15,9),(15,15), ] {
             let pos = grid_to_pos(origin, r, c);
             painter.circle_filled(pos, 4.0, Color32::from_rgb(80, 50, 20));
         }
@@ -263,20 +282,48 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
         if app.is_game_over() {
             if let Some(session) = &mut app.session {
                 if let GameState::GameOver { winner } = &session.state {
-                    let center = board_rect.center();
-                    let rect = Rect::from_center_size(center, Vec2::new(220.0, 80.0));
-                    painter.rect_filled(rect, 8.0, Color32::from_rgba_premultiplied(0, 0, 0, 180));
-                    painter.text(
-                        center,
-                        egui::Align2::CENTER_CENTER,
-                        format!("{} wins! 🎉", winner.unwrap().name()),
-                        egui::FontId::proportional(28.0),
-                        Color32::GOLD,
+                    let winner = winner.unwrap();
+                    painter.rect_filled(
+                        board_rect,
+                        4.0,
+                        Color32::from_rgba_premultiplied(0, 0, 0, 140),
                     );
-                    if winner.unwrap() == session.ai_turn {
-                        session.ai_emotion.set_permanent(AiEmotion::Happy);
-                    } else {
-                        session.ai_emotion.set_permanent(AiEmotion::Angry);
+                    let center = board_rect.center();
+                    let card = Rect::from_center_size(center, Vec2::new(240.0, 60.0));
+
+                    painter.rect_filled(card, 2.0, Color32::from_rgba_premultiplied(18, 18, 24, 245));
+
+                    let accent_bar = Rect::from_min_size(card.min, Vec2::new(card.width(), 3.0));
+                    let accent = match winner {
+                        crate::game::Player::Black => Color32::from_rgb(60, 60, 70),
+                        crate::game::Player::White => Color32::from_rgb(220, 220, 230),
+                    };
+                    painter.rect_filled(accent_bar, 0.0, accent);
+
+                    // stone
+                    let stone_pos = Pos2::new(card.min.x + 34.0, center.y);
+                    let stone_color = match winner {
+                        crate::game::Player::Black => Color32::from_rgb(30, 30, 35),
+                        crate::game::Player::White => Color32::from_rgb(240, 240, 245),
+                    };
+                    painter.circle_filled(stone_pos, 12.0, stone_color);
+                    painter.circle_stroke(stone_pos, 12.0, Stroke::new(1.5, Color32::from_rgb(80, 80, 90)));
+
+                    // single line: "WHITE WINS"
+                    painter.text(
+                        Pos2::new(stone_pos.x + 22.0, center.y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{} WINS", winner.name().to_uppercase()),
+                        egui::FontId::proportional(20.0),
+                        Color32::from_rgb(230, 230, 235),
+                    );
+
+                    if session.game_mode == GameMode::Solo {
+                        if winner == session.ai_turn {
+                            session.ai_emotion.set_permanent(AiEmotion::Happy);
+                        } else {
+                            session.ai_emotion.set_permanent(AiEmotion::Angry);
+                        }
                     }
                 }
             }
