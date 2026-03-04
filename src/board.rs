@@ -95,46 +95,40 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
 
             // AI emotion display
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                ui.add_space(20.0);
+                ui.add_space(8.0);
+
+                let displayed_time = if let Some(start) = app.ai_think_start {
+                    start.elapsed().as_secs_f32()
+                } else if let Some(d) = app.ai_last_think_duration {
+                    d
+                } else {
+                    0.0
+                }; 
+                ui.label(RichText::new(format!("⏱ Time to think: {:.1}s", displayed_time))
+                    .size(12.0)
+                    .color(Color32::from_rgb(150, 150, 150)));
+
+
                 let emotion = app.session
                     .as_ref()
                     .map(|s| s.ai_emotion.emotion)
                     .unwrap_or(AiEmotion::Neutral);
+
                 if let Some(texture) = app.ai_textures.get(&emotion) {
-                    // Frame comes first in bottom_up = renders at bottom
                     egui::Frame::none()
-                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 140, 200)))
-                        .rounding(egui::Rounding {
-                            nw: 0.0, ne: 8.0,
-                            sw: 8.0, se: 8.0,
-                        })
-                        .inner_margin(egui::Margin::same(6.0))
+                        .stroke(egui::Stroke::new(2.0, Color32::from_rgb(100, 140, 200)))
+                        .rounding(egui::Rounding::same(8.0))
+                        .inner_margin(egui::Margin::same(4.0))
                         .show(ui, |ui| {
-                            ui.add(
-                                egui::Image::new(texture)
-                                    .fit_to_exact_size(egui::vec2(120.0, 120.0))
-                            );
+                            ui.set_width(132.0);
+                            ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(124.0, 124.0)));
                         });
-                    // Tab comes second = renders on top of frame
-                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                        ui.add_space(4.0); // small left indent to align with frame edge
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(100, 140, 200))
-                            .rounding(egui::Rounding {
-                                nw: 4.0, ne: 4.0,
-                                sw: 0.0, se: 0.0,
-                            })
-                            .inner_margin(egui::Margin { left: 8.0, right: 8.0, top: 2.0, bottom: 0.0 })
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new("AI")
-                                        .small()
-                                        .color(egui::Color32::WHITE)
-                                        .strong()
-                                );
-                            });
-                    });
+
+                    ui.label(RichText::new("— AI —")
+                        .size(13.0)
+                        .color(Color32::from_rgb(100, 140, 200))
+                        .strong());
+
                 }
             });
         });
@@ -143,19 +137,24 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
     CentralPanel::default().show(ctx, |ui| {
         // Ai thread spawn
         if let Some(session) = &mut app.session {
-            if session.game_mode == crate::game::GameMode::Solo
-                && session.current_player == session.ai_turn
+            if session.game_mode != crate::game::GameMode::TwoPlayer
+                && (session.current_player == session.ai_turn || session.game_mode == GameMode::AiVsAi)
                 && !app.ai_thinking
                 && session.state == GameState::Playing
             {
                 dbg!("Spawning AI thread...");
                 app.ai_thinking = true;
+                app.ai_think_start = Some(std::time::Instant::now());
                 let board_clone = session.board.clone();
                 let ai_player = session.ai_turn;
                 let (tx, rx) = mpsc::channel();
                 app.ai_rx = Some(rx);
+                let ai_caps = session.captures_for(session.ai_turn);
+                let opp_caps = session.captures_for(session.ai_turn.next());
+                let ai_depth = app.ai_depth;
                 std::thread::spawn(move || {
-                    let best = crate::ai::best_move(&board_clone, ai_player, 3);
+                    let best = crate::ai::best_move(&board_clone, ai_player, ai_depth, ai_caps, opp_caps);
+                    dbg!("AI thread finished with move:", &best);
                     tx.send(best).unwrap(); // unwrap is here so the program panic if send return an error
                 });
             }
@@ -227,12 +226,15 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
         }
 
         // handle click — find nearest intersection
-        if response.clicked() {
-            if let Some(pos) = response.interact_pointer_pos() {
-                if let Some((row, col)) = pos_to_grid(origin, pos) {
-                    if let Some(session) = &mut app.session {
-                        if session.game_mode == GameMode::Solo && session.ai_turn == session.current_player {
+        if let Some(session) = &mut app.session {
+            let player = session.current_player;
+            if response.clicked() {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    if let Some((row, col)) = pos_to_grid(origin, pos) {
+                        if (session.game_mode == GameMode::Solo && session.ai_turn == session.current_player)
+                            || session.game_mode == GameMode::AiVsAi {
                             dbg!("It's AI's turn, ignoring click");
+                            dbg!("Session info:", &session.game_mode, session.current_player, session.ai_turn);
                             return;
                         }
                         if app.debug_no_turn_pass {
@@ -241,16 +243,18 @@ pub fn show(ctx: &egui::Context, app: &mut GomokuApp) {
                         } else {
                             session.play_at(col, row);
                         }
-                        let mut rng = rand::thread_rng();
-                        let roll: f64 = rng.gen_range(0.0..1.0);
 
-                        match roll {
-                            // r if r < 0.2 => session.ai_emotion.set_timed(AiEmotion::Angry, Duration::from_millis(400)),
-                            r if r < 0.5 && r >= 0.2 => session.ai_emotion.set_timed(AiEmotion::Surprised, Duration::from_millis(500)),
-                            _ => {}
-                        }
                         dbg!("Clicked grid:", row, col);
                     }
+                }
+            }
+            if player != session.current_player || (session.game_mode == GameMode::AiVsAi && session.ai_turn != session.current_player) {
+                let mut rng = rand::thread_rng();
+                let roll: f64 = rng.gen_range(0.0..1.0);
+                match roll {
+                    r if r < 0.2 => session.ai_emotion.set_timed(AiEmotion::Angry, Duration::from_millis(600)),
+                    r if r < 0.4 && r >= 0.2 => session.ai_emotion.set_timed(AiEmotion::Surprised, Duration::from_millis(600)),
+                    _ => {}
                 }
             }
         }

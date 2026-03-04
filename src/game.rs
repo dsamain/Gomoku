@@ -114,24 +114,20 @@ impl Board {
     // -------------------------------------------------------------------------
 
     /// Returns true if placing at (x,y) for player creates a double-three.
-    pub fn is_double_three(&self, x: usize, y: usize, player: Player) -> bool {
-        let mut temp = *self;
-        temp.cells[y][x] = player.to_cell();
+    pub fn is_double_three(&mut self, x: usize, y: usize, player: Player) -> bool {
+    let cell = player.to_cell();
+    debug_assert!(self.cells[y][x] == Cell::Empty);
 
-        let free_three_count = DIRECTIONS.iter()
-            .filter(|&&(dx, dy)| temp.is_free_three(x, y, dx, dy, player))
-            .count();
+    self.cells[y][x] = cell;
 
-        // temp to debug all free three coordinates
-        for &(dx, dy) in DIRECTIONS.iter() {
-            if temp.is_free_three(x, y, dx, dy, player) {
-                dbg!("Free three at:", (x, y), "direction:", (dx, dy));
-            }
-        }
-        dbg!("double three count for:", (x, y), "is:", free_three_count);
+    let free_three_count = DIRECTIONS.iter()
+        .filter(|&&(dx, dy)| self.is_free_three(x, y, dx, dy, player))
+        .count();
 
-        free_three_count >= 2
-    }
+    self.cells[y][x] = Cell::Empty;
+
+    free_three_count >= 2
+}
 
     /// Returns true if there is a free-three through (x,y) in direction (dx,dy).
     /// A free-three is exactly 3 aligned stones that can be extended to an open four (.XXXX.)
@@ -225,7 +221,7 @@ impl Board {
         (left, right)
     }
 
-    fn check_winner_from(&self, x: usize, y: usize) -> Option<Player> {
+    pub fn check_winner_from(&self, x: usize, y: usize) -> Option<Player> {
         let cell = self.cells[y][x];
         if cell == Cell::Empty { return None; }
 
@@ -270,6 +266,7 @@ pub enum GameState {
 pub enum GameMode {
     Solo,
     TwoPlayer,
+    AiVsAi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

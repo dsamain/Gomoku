@@ -3,7 +3,7 @@ use eframe::egui::{CentralPanel, ColorImage};
 use std::sync::mpsc;
 use std::collections::HashMap;
 
-use crate::game::{GameSession, GameState, AiEmotion};
+use crate::game::{GameSession, GameState, AiEmotion, GameMode};
 use crate::{egui, settings, menu, board};
 
 
@@ -19,12 +19,16 @@ pub struct GomokuApp {
     pub session: Option<GameSession>,
     pub ai_rx: Option<mpsc::Receiver<Result<(usize, usize), String>>>,
     pub ai_thinking: bool,
+    pub ai_think_start: Option<std::time::Instant>,
+    pub ai_last_think_duration: Option<f32>,
+
     pub ai_textures: HashMap<AiEmotion, egui::TextureHandle>,
 
     // Settings
-    pub debug_mode: bool,
-    pub two_player_mode: bool,
+    pub game_mode: GameMode,
+    pub ai_depth: u32,
     pub debug_no_turn_pass: bool,
+    pub debug_mode: bool,
 }
 
 impl Default for GomokuApp {
@@ -34,9 +38,13 @@ impl Default for GomokuApp {
             session: None,
             ai_rx: None,
             ai_thinking: false,
+            ai_think_start: None,
+            ai_last_think_duration: None,
+
             ai_textures: HashMap::new(),
 
-            two_player_mode: false,
+            game_mode: GameMode::Solo,
+            ai_depth: 3,
             debug_mode: true,
             debug_no_turn_pass: false,
         }
@@ -62,6 +70,8 @@ impl eframe::App for GomokuApp {
                             }
                         }
                         self.ai_thinking = false;
+                        self.ai_last_think_duration = self.ai_think_start.map(|start| start.elapsed().as_secs_f32());
+                        self.ai_think_start = None;
                         self.ai_rx = None;
                     }
                 }
@@ -128,19 +138,15 @@ impl GomokuApp {
 
     // when start game, session is built from default, then parameter from app are applied
     pub fn start_game(&mut self) {
-        self.session = Some(GameSession::default());
-        // self.session.as_mut().unwrap().state = GameState::Playing;
-        if let Some(session) = &mut self.session {
-            session.state = GameState::Playing;
-            if self.two_player_mode {
-                session.game_mode = crate::game::GameMode::TwoPlayer;
-            } else {
-                session.game_mode = crate::game::GameMode::Solo;
-            }
-        }
+        dbg!("Starting new game with mode:", &self.game_mode, "and AI depth:", self.ai_depth);
+        let mut session = GameSession::default();
+        session.state = GameState::Playing;
+        session.game_mode = self.game_mode.clone();
+        self.session = Some(session);
         self.screen = Screen::Game;
-    }
 
+    }
+    
     pub fn back_to_menu(&mut self) {
         self.session = None;
         self.screen = Screen::Menu;
