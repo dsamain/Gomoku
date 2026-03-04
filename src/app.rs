@@ -147,6 +147,7 @@ impl GomokuApp {
         session.game_mode = self.game_mode.clone();
         self.session = Some(session);
         self.screen = Screen::Game;
+        self.ai_last_stats = None;
 
     }
     
